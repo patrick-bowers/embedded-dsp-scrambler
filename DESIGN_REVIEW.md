@@ -1,3 +1,15 @@
+# Design review and historical corrections
+
+## Current release update
+
+The owner has now supplied all eight source versions. The core ADC → DSP → PWM project and fixed-block scrambler are completed, and an initial LFSR/XOR sketch is included. Timer1/OCR1A = 199 with prescaler 8 drives 10 kHz acquisition events; ADC prescaler 64 gives a 250 kHz conversion clock; Timer3/OCR3C drives D3 at 62.5 kHz. These replace the older mixed Uno/Timer2/free-running assumptions.
+
+Statements below that source is pending or LFSR/XOR is only planned describe the earlier review. They are retained as a historical engineering log, not the current release status. See [README](README.md), [architecture](docs/architecture.md), and [testing notes](docs/testing_notes.md) for current details. LFSR characterization, a matching descrambler, FFT comparison, and analog reconstruction remain future work.
+
+---
+
+## Earlier review (preserved)
+
 # Design review and validation plan
 
 Prepared from the June 2026 progress notes, the original blueprint, and the author's September 2026 update. The update supersedes the June implementation status: Timer1 controls 10 kHz sampling events; Timer3/OCR3C drives D3; gain, low-pass filtering, and double-buffered eight-sample reordering are implemented according to the author. Current source and scope captures remain pending. The corrections below concern historical documents unless explicitly noted.
