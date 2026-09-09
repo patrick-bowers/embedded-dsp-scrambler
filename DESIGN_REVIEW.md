@@ -1,49 +1,48 @@
-# Design review and historical corrections
+# Implementation review
 
-## Current release update
+This review describes the source currently included in the repository. It distinguishes code-level findings from hardware behavior that still needs reproducible measurement.
 
-The owner has now supplied all eight source versions. The core ADC → DSP → PWM project and fixed-block scrambler are completed, and an initial LFSR/XOR sketch is included. Timer1/OCR1A = 199 with prescaler 8 drives 10 kHz acquisition events; ADC prescaler 64 gives a 250 kHz conversion clock; Timer3/OCR3C drives D3 at 62.5 kHz. These replace the older mixed Uno/Timer2/free-running assumptions.
+## Implemented design
 
-Statements below that source is pending or LFSR/XOR is only planned describe the earlier review. They are retained as a historical engineering log, not the current release status. See [README](README.md), [architecture](docs/architecture.md), and [testing notes](docs/testing_notes.md) for current details. LFSR characterization, a matching descrambler, FFT comparison, and analog reconstruction remain future work.
+Stages 03–08 use the same interrupt-driven acquisition and output structure:
 
----
+1. Timer1 enters CTC mode with a prescaler of 8 and `OCR1A = 199`, producing a nominal 10 kHz compare rate from the 16 MHz clock.
+2. Each Timer1 compare interrupt starts an ADC0 conversion.
+3. The ADC completion interrupt processes the 10-bit sample.
+4. The result is reduced to eight bits and written to Timer3 channel C for output on D3.
 
-## Earlier review (preserved)
+Timer3 runs in 8-bit Fast PWM mode without a prescaler, giving a calculated carrier frequency of 62.5 kHz. The ADC uses AVcc as its reference and a prescaler of 64, giving a calculated ADC clock of 250 kHz.
 
-# Design review and validation plan
+The processing stages are present in source:
 
-Prepared from the June 2026 progress notes, the original blueprint, and the author's September 2026 update. The update supersedes the June implementation status: Timer1 controls 10 kHz sampling events; Timer3/OCR3C drives D3; gain, low-pass filtering, and double-buffered eight-sample reordering are implemented according to the author. Current source and scope captures remain pending. The corrections below concern historical documents unless explicitly noted.
+- Comparator: maps samples above 512 to 255 and all other samples to 0.
+- Digital gain: recenters around 512, divides the signed displacement by two, and restores the midpoint.
+- Low-pass filter: implements a stateful integer recurrence with a nominal coefficient of one quarter.
+- Block permutation: alternates two eight-sample buffers and reads the completed buffer in the order `4, 0, 6, 2, 7, 1, 5, 3`.
+- LFSR/XOR experiment: advances an 8-bit LFSR initialized to `0xA7` and XORs its value with each reduced sample.
 
-## Historical document corrections and remaining checks
+## Design details worth preserving
 
-1. **Board and timer mapping.** The blueprint names an Uno; the progress notes name a Mega 2560. On a Mega, D3 is OC3C and Timer2 output OC2B is D9. A Timer2/OCR2B example for Uno D3 cannot simply be reused on Mega D3. The author now reports the correct Timer3/OCR3C configuration for D3; confirm it in the source when uploaded. Check the actual sketch against the [official Mega pinout](https://docs.arduino.cc/resources/pinouts/A000067-full-pinout.pdf).
+- Sampling and PWM generation use separate timers, keeping acquisition cadence independent of the output carrier.
+- ADC processing occurs on conversion completion rather than assuming a conversion finishes inside the timer ISR.
+- Midpoint-centered gain uses signed intermediate arithmetic, avoiding unsigned underflow below midscale.
+- Double buffering allows one sample block to be captured while the previous block is emitted.
+- The staged sketches make individual peripheral and processing concepts easier to isolate and test.
 
-2. **Sampling arithmetic.** For a 16 MHz AVR and normal 13-cycle conversions, prescaler 16 implies a 1 MHz ADC clock and a theoretical conversion rate near 76.9 kS/s. A 500 kHz ADC clock corresponds to prescaler 32 and about 38.5 kS/s. Prescaler 64 gives about 19.2 kS/s, not 32 kS/s. These historical free-running calculations do not describe the updated Timer1-driven 10 kS/s design. Completed conversion throughput and jitter still need measurement. Higher ADC clocks trade resolution for speed; do not claim a specific effective resolution without measurements. See [Microchip ADC timing guidance](https://www.microchip.com/content/dam/mchp/documents/OTH/ApplicationNotes/ApplicationNotes/AN2538-ADC-of-megaAVR-in-SingleEnded-Mode-00002538A.pdf).
+## Known boundaries
 
-3. **Reconstruction filter.** A 1 kΩ / 10 µF RC stage has `fc = 1/(2*pi*R*C) ≈ 15.9 Hz`. For a single unloaded stage, its amplitude response at 1 kHz is approximately 0.0159 (about -36 dB), so it heavily suppresses the intended kHz signal. Two passive stages also load each other. Choose a filter based on the desired signal bandwidth and measured PWM carrier, rather than treating 10 µF as a validated audio reconstruction value. The progress note's text diagram also appears to connect the output junction directly to ground; clarify the actual wiring.
+- The 250 kHz ADC clock is derived from register settings, but effective resolution at that clock has not been measured.
+- The calculated steady-state conversion time is shorter than the 100 µs trigger interval, but conversion cadence, interrupt latency, and jitter still require measurement.
+- Timer3 produces PWM rather than a reconstructed analog signal. No output filter or DAC is included.
+- The block scrambler's static buffers start at zero, so stage 07 emits a zero-filled block during startup.
+- Stage 08 does not include a descrambler, framing, synchronization, or round-trip recovery test.
+- An LFSR/XOR sequence provides reversible obfuscation when both sides are synchronized; it is not a secure encryption scheme.
 
-4. **Spectral inversion target.** Alternating sample sign maps a real tone below Nyquist to `f_out = fs/2 - f_in`. At 10 kS/s, 500 Hz maps to 4.5 kHz; 1 kHz maps to 4 kHz. A 1 kHz-to-4.5 kHz claim requires a different sample rate. The updated nominal 10 kS/s design would map a 1 kHz tone to 4 kHz if alternating-sign spectral inversion is added. The current reported scrambling is sample reordering, not that spectral-inversion mode.
+## Validation priorities
 
-5. **Sample scaling.** The blueprint subtracts 512 from a 10-bit sample, then adds 128 and writes an 8-bit PWM value. That can clip or wrap; define the 10-to-8-bit scaling, signed intermediate range, and saturation explicitly before implementing it.
-
-6. **Sampling and PWM update rates.** A nominal 76.9 kS/s ADC rate exceeds a 62.5 kHz PWM carrier. Register writes are not automatically equivalent to independently reconstructed samples; the updated nominal 10 kS/s design avoids this specific rate mismatch, but must still account for output register buffering.
-
-7. **Security and recovery.** A constant XOR byte is a reversible digital transform, not secure encryption. Exact digital XOR recovery does not establish exact recovery after PWM filtering and re-sampling, which lose information. Remove claims that these experiments reproduce the security of named tactical radios.
-
-## Validation record to build
-
-| Test | Record | Current evidence |
-| --- | --- | --- |
-| Input bias | Scope capture, min/max, offset, probe setting | Numerical observations in June notes only |
-| Sample timing | Completed conversion interval, jitter, timer settings | Author reports 5.0 kHz OC1A toggle output for 10 kHz timer events; capture pending |
-| PWM carrier | Pin, timer mode, frequency, duty cycle range | Timer3/D3, 62.5 kHz and 6.8–9.6 µs widths reported; capture pending |
-| Bypass | Paired input/output traces, gain and phase versus frequency | Pending |
-| Gain, low-pass, sample reordering | Source, numeric vectors, paired traces, buffer timing | Implementation reported September 2026; files pending |
-| Spectral mapping | Actual fs, input frequency, predicted and measured output peak | Pending |
-| LFSR/XOR | Digital round-trip check, sequence alignment, separate analog distortion assessment | Planned next stage |
-
-## Simulation scope
-
-[Wokwi](https://docs.wokwi.com/getting-started/supported-hardware) supports the Mega 2560 and digital logic analysis. Its [analog simulation is limited](https://docs.wokwi.com/chips-api/analog), so it is not evidence that this analog reconstruction circuit works. The listed built-in hardware also does not include the FM project's Si4703 tuner.
-
-A later simulation should target the actual saved firmware, label its inputs and assumptions, and publish its source alongside screenshots. Numerical filter plots or synthetic FFTs should be labeled as calculated/simulated, never as oscilloscope measurements. No simulation results are claimed for this repository release.
+1. Add a reproducible Arduino build or CI check for all eight sketches.
+2. Record Timer1 compare cadence, completed ADC cadence, and timing jitter with the exact firmware revision and scope settings.
+3. Exercise the filter and block permutation with known sample vectors and document expected versus observed output.
+4. Capture input and PWM output traces with generator amplitude, offset, frequency, probe attenuation, and coupling recorded.
+5. Implement a synchronized digital descrambler before making any recovered-signal claim.
+6. If analog output is required, design and validate a reconstruction stage for the intended signal bandwidth.
