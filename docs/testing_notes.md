@@ -1,29 +1,54 @@
-# Experimental testing notes
+# Testing status and measurement plan
 
-## Recorded hardware observations
+## Evidence boundary
 
-Equipment: Mega 2560 R3, function generator, oscilloscope, and an approximately 1 kHz sine input on A0.
+The values below were transcribed from development notes. The original oscilloscope captures, complete instrument settings, and a revision-linked test log are not included in this repository, so these values should be treated as preliminary bench observations rather than independently reproducible results.
 
-| Experiment | Expected behavior | Recorded observation |
+The noted setup used an Arduino Mega 2560 R3, a function generator, an oscilloscope, and an approximately 1 kHz sine-wave input on A0.
+
+## Preliminary bench observations
+
+| Experiment | Expected from implementation | Observation recorded in development notes |
 | --- | --- | --- |
-| Timer3 PWM | 16 MHz / 256 = 62.5 kHz | Approximately 62.5 kHz carrier |
-| Timer1 OC1A, D11 | 10 kHz compare events, output toggles at each event | 5.0 kHz square wave |
-| Comparator | ADC > 512 produces 255; otherwise 0 | 1.0006 kHz output from approximately 1 kHz input |
-| PWM duty encoding | Duty changes with processed samples | High widths approximately 6.8–9.6 µs; calculated duty 42.5–60% |
-| Floating input | Timer3 continues running independently | Carrier remained with A0 disconnected; floating samples are not meaningful input data |
+| Timer3 PWM carrier | `16 MHz / 256 = 62.5 kHz` | Approximately 62.5 kHz |
+| Timer1 diagnostic on D11 | 10 kHz compare events; one output toggle per event produces a 5 kHz waveform | 5.0 kHz square wave |
+| Comparator | Samples above 512 produce full-scale PWM duty; lower samples produce zero duty | 1.0006 kHz output for an approximately 1 kHz input |
+| PWM duty encoding | High time changes with the processed sample | Approximately 6.8–9.6 µs high time, equivalent to 42.5–60% of a 16 µs period |
+| Floating A0 | Timer3 continues to generate its carrier | Carrier remained present; floating ADC samples are not meaningful signal data |
 
-The measurements are transcribed from the owner's testing record. No new physical measurements were made during repository preparation. Scope captures are pending upload.
+No new physical measurements were made while organizing the repository.
 
-## Completed core and extension status
+## What source inspection confirms
 
-- Core ADC/PWM pipeline, timer verification, interrupt acquisition, comparator, gain, low-pass filtering, and fixed block reordering: implemented; sketches included.
-- Initial LFSR/XOR: source included, but the supplied notes explicitly say it has not received the same experimental validation as the timer, comparator, and PWM stages.
-- Descrambler, recovered-signal comparison, FFT analysis, analog reconstruction, and final characterization: future work.
+- All eight staged sketches are present.
+- Stages 03–08 configure Timer1-triggered ADC acquisition and Timer3 PWM output.
+- Comparator, midpoint-centered gain, integer low-pass filtering, and fixed block permutation are implemented in their respective sketches.
+- Stage 08 contains an LFSR/XOR transform, but no inverse path or synchronization mechanism.
 
-## Repository checks
+Source inspection alone does not establish successful compilation, upload, electrical behavior, timing accuracy, signal fidelity, or round-trip recovery. No build log or automated test result is committed here.
 
-All eight sketches passed ATmega2560-targeted C++ syntax checks using the installed AVR GCC 7.3.0 toolchain and Arduino AVR core 1.8.8 headers. The Arduino CLI full-build attempt was blocked by local package initialization permissions, so a full Arduino build/link and hardware upload are not claimed. The original code was not changed to manufacture a passing result.
+## Current validation status
 
-## Next validation record
+| Area | Status |
+| --- | --- |
+| Register configuration and algorithm structure | Reviewable in source |
+| Timer, comparator, and PWM observations | Preliminary values recorded; captures unavailable |
+| Reproducible builds for every sketch | Not documented in the repository |
+| ADC latency, cadence, and jitter | Not measured here |
+| Filter response and block-order vectors | Not documented here |
+| LFSR sequence characterization | Not documented here |
+| Descrambling and recovered-sample comparison | Not implemented |
+| Analog reconstruction | Not implemented |
 
-Record the exact sketch revision, generator frequency/amplitude/offset, wiring, probe attenuation, scope coupling, trigger, timebase, and measured values with each capture. Add input-versus-output traces, completed ADC cadence/jitter, block startup/order behavior, LFSR sequence alignment, and digital round-trip checks. Keep calculated expectations, simulated results, and physical measurements labeled separately.
+## Recommended test record
+
+For each future measurement, record:
+
+- sketch path and commit revision;
+- board and supply voltage;
+- generator waveform, frequency, amplitude, offset, and output impedance;
+- probe attenuation, coupling, trigger, and timebase;
+- measurement points and shared-ground arrangement;
+- calculated expectation, observed value, and acceptance criterion.
+
+Priority captures are the Timer1 diagnostic output, ADC completion cadence, input-versus-PWM timing, filter response, and block-permutation behavior with a known repeating input. Keep calculated values, simulations, and physical measurements clearly labeled.
